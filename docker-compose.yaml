@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     volumes:
      - .:/app  
-     - external-storage:/media/uploads/1
+     - external-storage:/media/uploads/
     tty: true
     stdin_open: true
 
