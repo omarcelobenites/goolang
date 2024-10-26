@@ -1,8 +1,10 @@
 package converter
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"imersaofc/internal/rabbitmq"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -11,12 +13,20 @@ import (
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/streadway/amqp"
 )
 
-type VideoConverter struct{}
+type VideoConverter struct {
+	db             *sql.DB
+	rabbitmqClient *rabbitmq.RabbitClient
+}
 
-func NewVideoConverter() *VideoConverter {
-	return &VideoConverter{}
+func NewVideoConverter(rabbitmqClient *rabbitmq.RabbitClient, db *sql.DB) *VideoConverter {
+	return &VideoConverter{
+		rabbitmqClient: rabbitmqClient,
+		db:             db,
+	}
 }
 
 type VideoTask struct {
@@ -24,11 +34,17 @@ type VideoTask struct {
 	Path    string `json:"path"`
 }
 
-func (vc *VideoConverter) Handle(msg []byte) {
+func (vc *VideoConverter) Handle(d amqp.Delivery, conversionExch, comfirmationKey, confirmationQueue string) {
 	var task VideoTask
-	err := json.Unmarshal(msg, &task)
+	err := json.Unmarshal(d.Body, &task)
 	if err != nil {
 		vc.logError(task, "Failed to unmarshal task", err)
+		return
+	}
+
+	if IsProcessed(vc.db, task.VideoID) {
+		slog.Warn("Video already processed", slog.Int("video_id", task.VideoID))
+		d.Ack(false)
 		return
 	}
 
@@ -37,6 +53,17 @@ func (vc *VideoConverter) Handle(msg []byte) {
 		vc.logError(task, "Failed to process video", err)
 		return
 	}
+
+	err = MarkProcessed(vc.db, task.VideoID)
+	if err != nil {
+		vc.logError(task, "Failed to mark video as processed", err)
+		return
+	}
+	d.Ack(false)
+	slog.Info("Video marked as processed", slog.Int("video_id", task.VideoID))
+
+	confirmationMessage := []byte(fmt.Sprintf(`{"video_id": %d, "path": "%s"}`, task.VideoID, task.Path))
+	err = vc.rabbitmqClient.PublishMessage(conversionExch, comfirmationKey, confirmationQueue, confirmationMessage)
 
 }
 
@@ -87,7 +114,7 @@ func (vc *VideoConverter) logError(task VideoTask, message string, err error) {
 	serializedError, _ := json.Marshal(errorData)
 	slog.Error("Processing error", slog.String("error_details", string(serializedError)))
 
-	//todo: register error in database
+	RegisterError(vc.db, errorData, err)
 
 }
 

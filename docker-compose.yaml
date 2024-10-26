@@ -4,10 +4,59 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-     - .:/app  
-     - external-storage:/media/uploads/
+      - .:/app # Mount the local app directory for live development
+      - external-storage:/media/uploads # Mount external storage volume
     tty: true
     stdin_open: true
+    ports:
+      - "8080:8080"
+    environment:
+      DEBUG: "true"
+      POSTGRES_USER: "user"
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: "converter"
+      POSTGRES_HOST: "postgres"
+      POSTGRES_SSL_MODE: "disable"
+      RABBIMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      CONVERSION_EXCHANGE: "conversion_exchange"
+      CONVERSION_QUEUE: "video_conversion_queue"
+      CONVERSION_KEY: "conversion"
+      CONFIRMATION_KEY: "finish-conversion"
+      CONFIRMATION_QUEUE: "video_confirmation_queue"
+      
+    depends_on:
+      - postgres
+      - rabbitmq # Adicionando o RabbitMQ nas dependências
+
+  postgres:
+    image: postgres:13
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: "user"
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: "converter"
+    volumes:
+      - .docker/postgres:/var/lib/postgresql/data
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin4_container
+    restart: always
+    ports:
+      - "8888:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: teste@teste.com
+      PGADMIN_DEFAULT_PASSWORD: teste
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: "guest"
+      RABBITMQ_DEFAULT_PASS: "guest"
 
 volumes:
   external-storage:
